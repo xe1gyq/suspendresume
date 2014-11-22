@@ -86,6 +86,7 @@ class SystemValues:
 	dmesgfile = ''
 	ftracefile = ''
 	htmlfile = ''
+	bootgraphfile = 'bootgraph.html'
 	rtcwake = False
 	rtcwaketime = 10
 	rtcpath = ''
@@ -222,6 +223,7 @@ class Data:
 	html_device_id = 0
 	stamp = 0
 	outfile = ''
+	isboot = False
 	def __init__(self, num):
 		idchar = 'abcdefghijklmnopqrstuvwxyz'
 		self.testnumber = num
@@ -1631,17 +1633,25 @@ def loadRawKernelLog(dmesgfile):
 		m = re.match('[ \t]*(\[ *)(?P<ktime>[0-9\.]*)(\]) (?P<msg>.*)', line)
 		if(not m):
 			continue
+		ktime = float(m.group("ktime"))
 		msg = m.group("msg")
-		m = re.match('PM: Syncing filesystems.*', msg)
-		if(m):
+		if(not data and ktime == 0.0):
+			print("DMESG DATA INCLUDES: Boot log")
+			data = Data(len(testruns))
+			data.stamp = stamp
+			data.isboot = True
+		elif(re.match('PM: Syncing filesystems.*', msg)):
+			print("DMESG DATA INCLUDES: Suspend/resume log")
 			if(data):
 				testruns.append(data)
 			data = Data(len(testruns))
 			data.stamp = stamp
 		if(data):
-			m = re.match('.* *(?P<k>[0-9]\.[0-9]{2}\.[0-9]-.*) .*', msg)
-			if(m):
+			# best match for the kernel version
+			m = re.match('.* *(?P<k>[0-9]\.[0-9]{2}\.[0-9]-[a-z,0-9,\-,_]*) .*', msg)
+			if(m and not stamp['kernel']):
 				stamp['kernel'] = m.group('k')
+			# best match for the sleep mode
 			m = re.match('PM: Preparing system for (?P<m>.*) sleep', msg)
 			if(m):
 				stamp['mode'] = m.group('m')
@@ -1706,7 +1716,8 @@ def loadKernelLog():
 	lf.close()
 
 	if(len(testruns) < 1):
-		# bad log, but see if you can extract something meaningful anyway
+		# tool didn't make this log, but see if you can extract data anyway
+		print("DMESG DATA IS RAW (checking to see if anything can be extracted)")
 		testruns = loadRawKernelLog(sysvals.dmesgfile)
 
 	if(len(testruns) < 1):
@@ -1729,6 +1740,48 @@ def loadKernelLog():
 				data.dmesgtext[j] = last
 			last = line
 	return testruns
+
+def parseKernelBootLog(data):
+	global sysvals
+
+	ktime = 0.0
+	phase = 'resume_complete'
+	data.start = ktime
+	data.dmesg[phase]['start'] = ktime
+
+	for line in data.dmesgtext:
+		# parse each dmesg line into the time and message
+		m = re.match('[ \t]*(\[ *)(?P<ktime>[0-9\.]*)(\]) (?P<msg>.*)', line)
+		if(m):
+			val = m.group('ktime')
+			try:
+				ktime = float(val)
+			except:
+				doWarning('INVALID DMESG LINE: '+\
+					line.strip(), 'dmesg')
+				continue
+			msg = m.group('msg')
+		else:
+			continue
+
+		# initcall call
+		m = re.match('^calling *(?P<f>.*)\+.*', msg)
+		if(m):
+			f = m.group('f')
+			data.newAction(phase, f, 0, '', ktime, -1, '')
+			continue
+		# initcall return
+		m = re.match('^initcall *(?P<f>.*)\+.*', msg)
+		if(m):
+			f = m.group('f')
+			list = data.dmesg[phase]['list']
+			if(f in list):
+				dev = list[f]
+				dev['end'] = ktime
+				data.end = ktime
+			continue
+
+	data.dmesg[phase]['end'] = data.end
 
 # Function: parseKernelLog
 # Description:
@@ -2217,8 +2270,147 @@ def createHTMLSummarySimple(testruns, htmlfile):
 #	 testruns: array of Data objects from parseKernelLog or parseTraceLog
 # Output:
 #	 True if the html file was created, false if it failed
+def createBootGraph(data):
+	global sysvals
+
+	# html function templates
+	headline_stamp = '<div class="stamp">{0} {1} {2} {3}</div>\n'
+	html_zoombox = '<center><button id="zoomin">ZOOM IN</button><button id="zoomout">ZOOM OUT</button><button id="zoomdef">ZOOM 1:1</button></center>\n'
+	html_timeline = '<div id="dmesgzoombox" class="zoombox">\n<div id="{0}" class="timeline" style="height:{1}px">\n'
+	html_device = '<div id="{0}" title="{1}" class="thread" style="left:{2}%;top:{3}%;height:{4}%;width:{5}%;">{6}</div>\n'
+	html_phase = '<div class="phase" style="left:{0}%;width:{1}%;top:{2}%;height:{3}%;background-color:{4}">{5}</div>\n'
+	html_phaselet = '<div id="{0}" class="phaselet" style="left:{1}%;width:{2}%;background-color:{3}"></div>\n'
+	html_timetotal = '<table class="time1">\n<tr>'\
+		'<td class="blue">Kernel Boot Time: <b>{0} ms</b></td>'\
+		'</tr>\n</table>\n'
+
+	# device timeline
+	vprint('Creating Boot Timeline...')
+	devtl = Timeline()
+
+	# Generate the header for this timeline
+	t0 = data.start
+	tMax = data.end
+	tTotal = tMax - t0
+	if(tTotal == 0):
+		print('ERROR: No timeline data')
+		return False
+	boot_time = '%.0f'%(tTotal*1000)
+	devtl.html['timeline'] += html_timetotal.format(boot_time)
+
+	# determine the maximum number of rows we need to draw
+	phase = 'resume_complete'
+	list = data.dmesg[phase]['list']
+	timelinerows = setTimelineRows(list, list)
+	data.dmesg[phase]['row'] = timelinerows
+
+	# calculate the timeline height and create bounding box, add buttons
+	devtl.setRows(timelinerows + 1)
+	devtl.html['timeline'] += html_zoombox
+	devtl.html['timeline'] += html_timeline.format('dmesg', devtl.height)
+
+	# draw the colored boxes for each of the phases
+	boot = data.dmesg[phase]
+	length = boot['end']-boot['start']
+	left = '%.3f' % (((boot['start']-t0)*100.0)/tTotal)
+	width = '%.3f' % ((length*100.0)/tTotal)
+	devtl.html['timeline'] += html_phase.format('0', '100', \
+		'%.3f'%devtl.scaleH, '%.3f'%(100-devtl.scaleH), \
+		'#A9D0F5', '')
+
+	# draw the time scale, try to make the number of labels readable
+	devtl.html['scale'] = createTimeScale(t0, tMax, t0)
+	devtl.html['timeline'] += devtl.html['scale']
+	phaselist = data.dmesg[phase]['list']
+	for d in phaselist:
+		name = d
+		dev = phaselist[d]
+		height = (100.0 - devtl.scaleH)/data.dmesg[phase]['row']
+		top = '%.3f' % ((dev['row']*height) + devtl.scaleH)
+		left = '%.3f' % (((dev['start']-t0)*100)/tTotal)
+		width = '%.3f' % (((dev['end']-dev['start'])*100)/tTotal)
+		length = ' (%0.3f ms) ' % ((dev['end']-dev['start'])*1000)
+		color = 'rgba(204,204,204,0.5)'
+		devtl.html['timeline'] += html_device.format(dev['id'], \
+			d+length+'boot', left, top, '%.3f'%height, width, name)
+
+	# timeline is finished
+	devtl.html['timeline'] += '</div>\n</div>\n'
+
+	hf = open(sysvals.bootgraphfile, 'w')
+	thread_height = 0
+
+	# write the html header first (html head, css code, up to body start)
+	html_header = '<!DOCTYPE html>\n<html>\n<head>\n\
+	<meta http-equiv="content-type" content="text/html; charset=UTF-8">\n\
+	<title>AnalyzeSuspend</title>\n\
+	<style type=\'text/css\'>\n\
+		body {overflow-y: scroll;}\n\
+		.stamp {width: 100%;text-align:center;background-color:gray;line-height:30px;color:white;font: 25px Arial;}\n\
+		t0 {color:black;font: bold 30px Times;}\n\
+		t1 {color:black;font: 30px Times;}\n\
+		t2 {color:black;font: 25px Times;}\n\
+		t3 {color:black;font: 20px Times;white-space:nowrap;}\n\
+		t4 {color:black;font: bold 30px Times;line-height:60px;white-space:nowrap;}\n\
+		table {width:100%;}\n\
+		.gray {background-color:rgba(80,80,80,0.1);}\n\
+		.green {background-color:rgba(204,255,204,0.4);}\n\
+		.blue {background-color:#A9D0F5;}\n\
+		.purple {background-color:rgba(128,0,128,0.2);}\n\
+		.yellow {background-color:rgba(255,255,204,0.4);}\n\
+		.time1 {font: 22px Arial;border:1px solid;}\n\
+		.time2 {font: 15px Arial;border-bottom:1px solid;border-left:1px solid;border-right:1px solid;}\n\
+		td {text-align: center;}\n\
+		.hide {display: none;}\n\
+		.zoombox {position: relative; width: 100%; overflow-x: scroll;}\n\
+		.timeline {position: relative; font-size: 14px;cursor: pointer;width: 100%; overflow: hidden; background-color:#dddddd;}\n\
+		.thread {position: absolute; height: '+'%.3f'%thread_height+'%; overflow: hidden; line-height: 30px; border:1px solid;text-align:center;white-space:nowrap;background-color:rgba(204,204,204,0.5);}\n\
+		.thread:hover {background-color:white;border:1px solid red;z-index:10;}\n\
+		.hover {background-color:white;border:1px solid red;z-index:10;}\n\
+		.phase {position: absolute;overflow: hidden;border:0px;text-align:center;}\n\
+		.phaselet {position:absolute;overflow:hidden;border:0px;text-align:center;height:100px;font-size:24px;}\n\
+		.t {position:absolute;top:0%;height:100%;border-right:1px solid black;}\n\
+		button {height:40px;width:200px;margin-bottom:20px;margin-top:20px;font-size:24px;}\n\
+		#devicedetail {height:100px;box-shadow: 5px 5px 20px black;}\n\
+	</style>\n</head>\n<body>\n'
+	hf.write(html_header)
+
+	# write the test title and general info header
+	if(sysvals.stamp['time'] != ""):
+		hf.write(headline_stamp.format(sysvals.stamp['host'],
+			sysvals.stamp['kernel'], sysvals.stamp['mode'], \
+				sysvals.stamp['time']))
+
+	# write the device timeline
+	hf.write(devtl.html['timeline'])
+
+	# draw the colored boxes for the device detail section
+	hf.write('<div id="devicedetailtitle"></div>\n')
+	hf.write('<div id="devicedetail" style="display:none;">\n')
+	hf.write('<div id="devicedetail%d">\n' % data.testnumber)
+	hf.write(html_phaselet.format('boot', '0', '100', '#A9D0F5'))
+	hf.write('</div>\n')
+	hf.write('</div>\n')
+
+	# write the footer and close
+	addScriptCode(hf, [data])
+	hf.write('</body>\n</html>\n')
+	hf.close()
+	return True
+
+# Function: createHTML
+# Description:
+#	 Create the output html file from the resident test data
+# Arguments:
+#	 testruns: array of Data objects from parseKernelLog or parseTraceLog
+# Output:
+#	 True if the html file was created, false if it failed
 def createHTML(testruns):
 	global sysvals
+
+	if len(testruns) < 1:
+		print('ERROR: No timeline data')
+		return False
 
 	for data in testruns:
 		data.normalizeTime(testruns[-1].tSuspended)
@@ -3228,9 +3420,13 @@ def rerunTest():
 		testruns = parseTraceLog()
 	else:
 		testruns = loadKernelLog()
+		if(testruns[0].isboot):
+			bootdata = testruns.pop(0)
+			parseKernelBootLog(bootdata)
+			createBootGraph(bootdata)
 		for data in testruns:
 			parseKernelLog(data)
-		if(sysvals.ftracefile != ''):
+		if(sysvals.ftracefile != '' and not data.isboot):
 			appendIncompleteTraceLog(testruns)
 	createHTML(testruns)
 
@@ -3262,6 +3458,8 @@ def runTest(subdir):
 	else:
 		# data for kernels older than 3.15 is primarily in dmesg
 		testruns = loadKernelLog()
+		if(testruns[0].isboot):
+			bootdata = testruns.pop(0)
 		for data in testruns:
 			parseKernelLog(data)
 		if(sysvals.usecallgraph or sysvals.usetraceevents):
@@ -3300,6 +3498,8 @@ def runSummary(subdir, output):
 					d = os.path.basename(sysvals.dmesgfile)
 					print("\tInput files: %s and %s" % (f, d))
 				testdata = loadKernelLog()
+				if(testdata[0].isboot):
+					bootdata = testdata.pop(0)
 				data = testdata[0]
 				parseKernelLog(data)
 				testdata = [data]
