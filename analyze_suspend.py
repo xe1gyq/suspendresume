@@ -2277,8 +2277,8 @@ def createBootGraph(data):
 	headline_stamp = '<div class="stamp">{0} {1} {2} {3}</div>\n'
 	html_zoombox = '<center><button id="zoomin">ZOOM IN</button><button id="zoomout">ZOOM OUT</button><button id="zoomdef">ZOOM 1:1</button></center>\n'
 	html_timeline = '<div id="dmesgzoombox" class="zoombox">\n<div id="{0}" class="timeline" style="height:{1}px">\n'
-	html_device = '<div id="{0}" title="{1}" class="thread" style="left:{2}%;top:{3}%;height:{4}%;width:{5}%;">{6}</div>\n'
-	html_phase = '<div class="phase" style="left:{0}%;width:{1}%;top:{2}%;height:{3}%;background-color:{4}">{5}</div>\n'
+	html_device = '<div id="{0}" title="{1}" class="thread" style="left:{2}%;top:{3}px;height:{4}px;width:{5}%;">{6}</div>\n'
+	html_phase = '<div class="phase" style="left:{0}%;width:{1}%;top:{2}px;height:{3}px;background-color:{4}">{5}</div>\n'
 	html_phaselet = '<div id="{0}" class="phaselet" style="left:{1}%;width:{2}%;background-color:{3}"></div>\n'
 	html_timetotal = '<table class="time1">\n<tr>'\
 		'<td class="blue">Time from Kernel Boot to start of User Mode: <b>{0} ms</b></td>'\
@@ -2287,6 +2287,7 @@ def createBootGraph(data):
 	# device timeline
 	vprint('Creating Boot Timeline...')
 	devtl = Timeline()
+	devtl.rowH = 100
 
 	# Generate the header for this timeline
 	t0 = data.start
@@ -2301,11 +2302,10 @@ def createBootGraph(data):
 	# determine the maximum number of rows we need to draw
 	phase = 'resume_complete'
 	list = data.dmesg[phase]['list']
-	timelinerows = setTimelineRows(list, list)
-	data.dmesg[phase]['row'] = timelinerows
+	data.dmesg[phase]['row'] = devtl.getPhaseRows(list, list)
+	devtl.calcTotalRows()
 
-	# calculate the timeline height and create bounding box, add buttons
-	devtl.setRows(timelinerows + 1)
+	# create bounding box, add buttons
 	devtl.html['timeline'] += html_zoombox
 	devtl.html['timeline'] += html_timeline.format('dmesg', devtl.height)
 
@@ -2315,17 +2315,19 @@ def createBootGraph(data):
 	left = '%.3f' % (((boot['start']-t0)*100.0)/tTotal)
 	width = '%.3f' % ((length*100.0)/tTotal)
 	devtl.html['timeline'] += html_phase.format('0', '100', \
-		'%.3f'%devtl.scaleH, '%.3f'%(100-devtl.scaleH), \
+		'%.3f'%devtl.scaleH, '%.3f'%devtl.bodyH, \
 		'#A9D0F5', '')
 
 	# draw the time scale, try to make the number of labels readable
-	devtl.html['scale'] = createTimeScale(t0, tMax, t0)
+	devtl.createTimeScale(t0, tMax, t0)
 	devtl.html['timeline'] += devtl.html['scale']
+
+	# draw the device timeline
 	phaselist = data.dmesg[phase]['list']
 	for d in phaselist:
 		name = d
 		dev = phaselist[d]
-		height = (100.0 - devtl.scaleH)/data.dmesg[phase]['row']
+		height = devtl.bodyH/data.dmesg[phase]['row']
 		top = '%.3f' % ((dev['row']*height) + devtl.scaleH)
 		left = '%.3f' % (((dev['start']-t0)*100)/tTotal)
 		width = '%.3f' % (((dev['end']-dev['start'])*100)/tTotal)
