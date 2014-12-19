@@ -2275,7 +2275,7 @@ def colorForName(name, list):
 		i += 1
 	return list[total % count]
 
-# Function: createHTML
+# Function: createBootGraph
 # Description:
 #	 Create the output html file from the resident test data
 # Arguments:
