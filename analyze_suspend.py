@@ -1763,7 +1763,9 @@ def parseKernelBootLog(data):
 			msg = m.group('msg')
 		else:
 			continue
-
+		# only parse a max of 120 seconds
+		if ktime > 120:
+			break
 		# initcall call
 		m = re.match('^calling *(?P<f>.*)\+.*', msg)
 		if(m):
@@ -3424,6 +3426,8 @@ def rerunTest():
 			bootdata = testruns.pop(0)
 			parseKernelBootLog(bootdata)
 			createBootGraph(bootdata)
+			if len(testruns) == 0:
+				return
 		for data in testruns:
 			parseKernelLog(data)
 		if(sysvals.ftracefile != '' and not data.isboot):
