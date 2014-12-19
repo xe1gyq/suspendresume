@@ -1766,6 +1766,9 @@ def parseKernelBootLog(data):
 		# only parse a max of 120 seconds
 		if ktime > 120:
 			break
+		# stop at start of user mode
+		if(re.match('^Freeing unused kernel memory.*', msg)):
+			break
 		# initcall call
 		m = re.match('^calling *(?P<f>.*)\+.*', msg)
 		if(m):
@@ -2283,7 +2286,7 @@ def createBootGraph(data):
 	html_phase = '<div class="phase" style="left:{0}%;width:{1}%;top:{2}%;height:{3}%;background-color:{4}">{5}</div>\n'
 	html_phaselet = '<div id="{0}" class="phaselet" style="left:{1}%;width:{2}%;background-color:{3}"></div>\n'
 	html_timetotal = '<table class="time1">\n<tr>'\
-		'<td class="blue">Kernel Boot Time: <b>{0} ms</b></td>'\
+		'<td class="blue">Time from Kernel Boot to start of User Mode: <b>{0} ms</b></td>'\
 		'</tr>\n</table>\n'
 
 	# device timeline
