@@ -2263,6 +2263,18 @@ def createHTMLSummarySimple(testruns, htmlfile):
 	hf.write('</body>\n</html>\n')
 	hf.close()
 
+# Function: colorForName
+# Description:
+#	 Generate a repeatable color from a list for a given name
+def colorForName(name, list):
+	i = 0
+	total = 0
+	count = len(list)
+	while i < len(name):
+		total += ord(name[i])
+		i += 1
+	return list[total % count]
+
 # Function: createHTML
 # Description:
 #	 Create the output html file from the resident test data
@@ -2277,11 +2289,11 @@ def createBootGraph(data):
 	headline_stamp = '<div class="stamp">{0} {1} {2} {3}</div>\n'
 	html_zoombox = '<center><button id="zoomin">ZOOM IN</button><button id="zoomout">ZOOM OUT</button><button id="zoomdef">ZOOM 1:1</button></center>\n'
 	html_timeline = '<div id="dmesgzoombox" class="zoombox">\n<div id="{0}" class="timeline" style="height:{1}px">\n'
-	html_device = '<div id="{0}" title="{1}" class="thread" style="left:{2}%;top:{3}px;height:{4}px;width:{5}%;">{6}</div>\n'
+	html_device = '<div id="{0}" title="{1}" class="thread{7}" style="left:{2}%;top:{3}px;height:{4}px;width:{5}%;">{6}</div>\n'
 	html_phase = '<div class="phase" style="left:{0}%;width:{1}%;top:{2}px;height:{3}px;background-color:{4}">{5}</div>\n'
 	html_phaselet = '<div id="{0}" class="phaselet" style="left:{1}%;width:{2}%;background-color:{3}"></div>\n'
 	html_timetotal = '<table class="time1">\n<tr>'\
-		'<td class="c3">Time from Kernel Boot to start of User Mode: <b>{0} ms</b></td>'\
+		'<td class="blue">Time from Kernel Boot to start of User Mode: <b>{0} ms</b></td>'\
 		'</tr>\n</table>\n'
 
 	# device timeline
@@ -2316,7 +2328,7 @@ def createBootGraph(data):
 	width = '%.3f' % ((length*100.0)/tTotal)
 	devtl.html['timeline'] += html_phase.format('0', '100', \
 		'%.3f'%devtl.scaleH, '%.3f'%devtl.bodyH, \
-		'#A9D0F5', '')
+		'white', '')
 
 	# draw the time scale, try to make the number of labels readable
 	devtl.createTimeScale(t0, tMax, t0)
@@ -2324,17 +2336,19 @@ def createBootGraph(data):
 
 	# draw the device timeline
 	phaselist = data.dmesg[phase]['list']
+	color = ['c1', 'c2', 'c3', 'c4', 'c5',
+		'c6', 'c7', 'c8', 'c9', 'c10']
 	for d in phaselist:
 		name = d
+		c = colorForName(name, color)
 		dev = phaselist[d]
 		height = devtl.bodyH/data.dmesg[phase]['row']
 		top = '%.3f' % ((dev['row']*height) + devtl.scaleH)
 		left = '%.3f' % (((dev['start']-t0)*100)/tTotal)
 		width = '%.3f' % (((dev['end']-dev['start'])*100)/tTotal)
 		length = ' (%0.3f ms) ' % ((dev['end']-dev['start'])*1000)
-		color = 'rgba(204,204,204,0.5)'
 		devtl.html['timeline'] += html_device.format(dev['id'], \
-			d+length+'boot', left, top, '%.3f'%height, width, name)
+			d+length+'kernel_mode', left, top, '%.3f'%height, width, name, ' '+c)
 
 	# timeline is finished
 	devtl.html['timeline'] += '</div>\n</div>\n'
@@ -2354,16 +2368,22 @@ def createBootGraph(data):
 		t3 {color:black;font: 20px Times;white-space:nowrap;}\n\
 		t4 {color:black;font: bold 30px Times;line-height:60px;white-space:nowrap;}\n\
 		table {width:100%;}\n\
-		.c1 {background-color:rgba(80,80,80,0.1);}\n\
-		.c2 {background-color:rgba(204,255,204,0.4);}\n\
-		.c3 {background-color:#A9D0F5;}\n\
-		.c4 {background-color:rgba(128,0,128,0.2);}\n\
-		.c5 {background-color:rgba(255,255,204,0.4);}\n\
+		.blue {background-color:rgba(169,208,245,0.4);}\n\
+		.c1 {background-color:rgba(209,0,0,0.4);}\n\
+		.c2 {background-color:rgba(255,102,34,0.4);}\n\
+		.c3 {background-color:rgba(255,218,33,0.4);}\n\
+		.c4 {background-color:rgba(51,221,0,0.4);}\n\
+		.c5 {background-color:rgba(17,51,204,0.4);}\n\
+		.c6 {background-color:rgba(34,0,102,0.4);}\n\
+		.c7 {background-color:rgba(51,0,68,0.4);}\n\
+		.c8 {background-color:rgba(204,255,204,0.4);}\n\
+		.c9 {background-color:rgba(169,208,245,0.4);}\n\
+		.c10 {background-color:rgba(255,255,204,0.4);}\n\
 		.time1 {font: 22px Arial;border:1px solid;}\n\
 		td {text-align: center;}\n\
 		.zoombox {position: relative; width: 100%; overflow-x: scroll;}\n\
 		.timeline {position: relative; font-size: 14px;cursor: pointer;width: 100%; overflow: hidden; background-color:#dddddd;}\n\
-		.thread {position: absolute; height: 0%; overflow: hidden; line-height: 30px; border:1px solid;text-align:center;white-space:nowrap;background-color:rgba(204,204,204,0.5);}\n\
+		.thread {position: absolute; height: 0%; overflow: hidden; line-height: 30px; border:1px solid;text-align:center;white-space:nowrap}\n\
 		.thread:hover {border:1px solid red;z-index:10;}\n\
 		.hover {background-color:white;border:1px solid red;z-index:10;}\n\
 		.phase {position: absolute;overflow: hidden;border:0px;text-align:center;}\n\
@@ -2387,7 +2407,7 @@ def createBootGraph(data):
 	hf.write('<div id="devicedetailtitle"></div>\n')
 	hf.write('<div id="devicedetail" style="display:none;">\n')
 	hf.write('<div id="devicedetail%d">\n' % data.testnumber)
-	hf.write(html_phaselet.format('boot', '0', '100', '#DDDDDD'))
+	hf.write(html_phaselet.format('kernel_mode', '0', '100', '#DDDDDD'))
 	hf.write('</div>\n')
 	hf.write('</div>\n')
 
